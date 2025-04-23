@@ -1,100 +1,123 @@
 // An instructor can only access their own students' data.
 const router = require("express").Router();
-const db = require("../db");
+const { prisma } = require("../db");
+
+const jwt = require("jsonwebtoken");
+const JWT_SECRET = process.env.JWT_SECRET || "1234";
 
 // Deny access if user is not logged in
-router.use((req, res, next) => {
-  if (!req.user) {
+const isLoggedIn = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.slice(7);
+  try {
+    const { id } = jwt.verify(token, JWT_SECRET);
+    req.userId = id;
+    next();
+  } catch (error) {
     return res.status(401).send("You must be logged in to do that.");
   }
-  next();
-});
+};
 
 // Get all students
-router.get("/", async (req, res, next) => {
+router.get("/", isLoggedIn, async (req, res, next) => {
   try {
-    const { rows: students } = await db.query(
-      "SELECT * FROM student WHERE instructorId = $1",
-      [req.user.id]
-    );
-    res.send(students);
+    const instructorId = req.userId;
+    const response = await prisma.student.findMany({
+      where: {
+        instructorId,
+      },
+    });
+    res.status(200).json(response);
   } catch (error) {
     next(error);
   }
 });
 
 // Get a student by id
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", isLoggedIn, async (req, res, next) => {
   try {
-    const {
-      rows: [student],
-    } = await db.query(
-      "SELECT * FROM student WHERE id = $1 AND instructorId = $2",
-      [req.params.id, req.user.id]
-    );
+    const id = parseInt(req.params.id);
+    const instructorId = req.userId;
+    console.log("instructorId: ", instructorId);
+    const response = await prisma.student.findFirst({
+      where: {
+        id,
+        instructorId,
+      },
+    });
 
-    if (!student) {
+    if (!response) {
       return res.status(404).send("Student not found.");
     }
 
-    res.send(student);
+    res.send(response);
   } catch (error) {
     next(error);
   }
 });
 
 // Create a new student
-router.post("/", async (req, res, next) => {
+router.post("/", isLoggedIn, async (req, res, next) => {
   try {
-    const {
-      rows: [student],
-    } = await db.query(
-      "INSERT INTO student (name, cohort, instructorId) VALUES ($1, $2, $3) RETURNING *",
-      [req.body.name, req.body.cohort, req.user.id]
-    );
-    res.status(201).send(student);
+    const name = req.body.name;
+    const cohort = req.body.cohort;
+    const instructorId = req.userId;
+
+    const response = await prisma.student.create({
+      data: {
+        name,
+        cohort,
+        instructorId,
+      },
+    });
+
+    res.status(201).send(response);
   } catch (error) {
-    next(error);
+    return res.status(400).send("Invalid JSON format.");
   }
 });
 
 // Update a student
-router.put("/:id", async (req, res, next) => {
+router.put("/:id", isLoggedIn, async (req, res, next) => {
   try {
-    const {
-      rows: [student],
-    } = await db.query(
-      "UPDATE student SET name = $1, cohort = $2 WHERE id = $3 AND instructorId = $4 RETURNING *",
-      [req.body.name, req.body.cohort, req.params.id, req.user.id]
-    );
+    const id = parseInt(req.params.id);
+    const name = req.body.name;
+    const cohort = req.body.cohort;
+    const instructorId = req.userId;
 
-    if (!student) {
-      return res.status(404).send("Student not found.");
-    }
+    const response = await prisma.student.update({
+      where: {
+        id,
+        instructorId,
+      },
+      data: {
+        name,
+        cohort,
+      },
+    });
 
-    res.send(student);
+    res.send(response);
   } catch (error) {
-    next(error);
+    return res.status(404).send("Student not found.");
   }
 });
 
 // Delete a student by id
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", isLoggedIn, async (req, res, next) => {
   try {
-    const {
-      rows: [student],
-    } = await db.query(
-      "DELETE FROM student WHERE id = $1 AND instructorId = $2 RETURNING *",
-      [req.params.id, req.user.id]
-    );
+    const id = parseInt(req.params.id);
+    const instructorId = req.userId;
 
-    if (!student) {
-      return res.status(404).send("Student not found.");
-    }
+    const response = await prisma.student.delete({
+      where: {
+        id,
+        instructorId,
+      },
+    });
 
-    res.send(student);
+    res.send(response);
   } catch (error) {
-    next(error);
+    return res.status(404).send("Student not found.");
   }
 });
 

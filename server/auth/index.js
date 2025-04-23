@@ -1,59 +1,80 @@
 const router = require("express").Router();
-const db = require("../db");
+const { prisma } = require("../db");
+
 const jwt = require("jsonwebtoken");
+const JWT_SECRET = process.env.JWT_SECRET || "1234";
+
+const isLoggedIn = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.slice(7);
+  try {
+    const { id } = jwt.verify(token, JWT_SECRET);
+    req.userId = id;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+const setToken = (id) => {
+  return jwt.sign({ id }, JWT_SECRET, { expiresIn: "8h" });
+};
 
 // Register a new instructor account
 router.post("/register", async (req, res, next) => {
   try {
-    const {
-      rows: [instructor],
-    } = await db.query(
-      "INSERT INTO instructor (username, password) VALUES ($1, $2) RETURNING *",
-      [req.body.username, req.body.password]
-    );
+    const username = req.body.username;
+    const password = req.body.username;
+
+    const response = await prisma.instructor.create({
+      data: {
+        username,
+        password,
+      },
+    });
 
     // Create a token with the instructor id
-    const token = jwt.sign({ id: instructor.id }, process.env.JWT);
+    const token = setToken(response.id);
 
     res.status(201).send({ token });
   } catch (error) {
-    next(error);
+    res.status(409).json({
+      message: "username is already taken",
+    });
   }
 });
 
 // Login to an existing instructor account
 router.post("/login", async (req, res, next) => {
   try {
-    const {
-      rows: [instructor],
-    } = await db.query(
-      "SELECT * FROM instructor WHERE username = $1 AND password = $2",
-      [req.body.username, req.body.password]
-    );
+    const username = req.body.username;
+    const password = req.body.password;
 
-    if (!instructor) {
-      return res.status(401).send("Invalid login credentials.");
+    const response = await prisma.instructor.findFirst({
+      where: {
+        username,
+      },
+    });
+
+    if (password == response.password) {
+      // Create a token with the instructor id
+      const token = setToken(response.id);
+
+      res.status(200).json({ token });
+    } else {
+      res.status(401).json({
+        message: "invalid email and/or password",
+      });
     }
-
-    // Create a token with the instructor id
-    const token = jwt.sign({ id: instructor.id }, process.env.JWT);
-
-    res.send({ token });
   } catch (error) {
     next(error);
   }
 });
 
 // Get the currently logged in instructor
-router.get("/me", async (req, res, next) => {
+router.get("/me", isLoggedIn, async (req, res, next) => {
   try {
-    const {
-      rows: [instructor],
-    } = await db.query("SELECT * FROM instructor WHERE id = $1", [
-      req.user?.id,
-    ]);
-
-    res.send(instructor);
+    res.status(200).json({ id: req.userId });
   } catch (error) {
     next(error);
   }
